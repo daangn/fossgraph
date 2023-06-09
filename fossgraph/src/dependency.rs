@@ -1,5 +1,7 @@
 pub mod normalize;
 
+// TODO: customize `Hash` trait to canonicalize well-known git URLs
+#[derive(Debug, PartialEq, Eq, Hash)]
 pub enum Dependency {
     Git {
         url: String,
