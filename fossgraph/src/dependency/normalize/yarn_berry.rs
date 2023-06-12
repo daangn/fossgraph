@@ -218,33 +218,32 @@ fn normalize_single_resolution(resolution: &str) -> Result<Dependency, Error> {
 }
 
 fn normalize_yaml(value: Value) -> Result<HashSet<Dependency>, Error> {
-    match value.as_mapping() {
-        Some(map) => {
-            let mut deps: HashSet<Dependency> = HashSet::new();
+    if let Some(map) = value.as_mapping() {
+        let mut deps: HashSet<Dependency> = HashSet::new();
 
-            let mut iter = map.iter();
-            let (_key, _value) = iter.next().unwrap(); // skip metadata
-            for (_key, value) in iter {
-                let resolution = value
-                    .as_mapping()
-                    .and_then(|map| map.get("resolution"))
-                    .and_then(|value| value.as_str())
-                    .ok_or_else(|| Error::invalid_format())?;
-                match normalize_single_resolution(resolution) {
-                    Ok(dependency) => {
-                        deps.insert(dependency);
-                    }
-                    Err(Error::UnsupportedResolution { .. }) => {
-                        // noop
-                    }
-                    Err(error) => {
-                        return Err(error);
-                    }
+        let mut iter = map.iter();
+        let (_key, _value) = iter.next().unwrap(); // skip metadata
+        for (_key, value) in iter {
+            let resolution = value
+                .as_mapping()
+                .and_then(|map| map.get("resolution"))
+                .and_then(|value| value.as_str())
+                .ok_or_else(|| Error::invalid_format())?;
+            match normalize_single_resolution(resolution) {
+                Ok(dependency) => {
+                    deps.insert(dependency);
+                }
+                Err(Error::UnsupportedResolution { .. }) => {
+                    // noop
+                }
+                Err(error) => {
+                    return Err(error);
                 }
             }
-            Ok(deps)
         }
-        None => Err(Error::invalid_format()),
+        Ok(deps)
+    } else {
+        Err(Error::invalid_format())
     }
 }
 
