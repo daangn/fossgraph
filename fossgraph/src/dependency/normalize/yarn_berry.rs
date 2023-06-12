@@ -50,7 +50,7 @@ impl Error {
 // "descriptor" follows form of `<ident>(@<range>)`
 // "ident" is package name (e.g. lodash, @types/lodash)
 // "range" follows form of `<protocol>:<selector>(#<source>)(::<bindings>)`
-//    One eception here is `git` and `github` protocl have other forms.
+//    Some eceptions here is `git` and `github` protocols have other forms.
 //
 // "selector" is a fixed version on a resolution
 
