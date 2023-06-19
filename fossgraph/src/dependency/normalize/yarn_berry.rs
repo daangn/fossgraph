@@ -76,6 +76,19 @@ struct PackageRange {
     bindings: Option<HashMap<String, String>>,
 }
 
+impl PackageRange {
+    fn get_archive_url(&self) -> Option<String> {
+        self.bindings
+            .as_ref()
+            .map(|bindings| {
+                bindings
+                    .get("__archiveUrl")
+                    .map(|archive_url| archive_url.clone())
+            })
+            .flatten()
+    }
+}
+
 impl TryFrom<&str> for PackageDescriptor {
     type Error = Error;
 
@@ -85,25 +98,23 @@ impl TryFrom<&str> for PackageDescriptor {
             // Note: Yarn serialize it as non-compatible with git protocol
             let (hostname, other) = range.split_once("/").unwrap();
             let range = vec![hostname, other].join(":");
-            if let Some((url, commit_hash)) = range.split_once("#commit=") {
-                Ok(Self::Git {
-                    ident: ident.into(),
-                    url: url.into(),
-                    commit_hash: commit_hash.into(),
-                })
-            } else {
-                Err(Error::invalid_descriptor(value))
-            }
+            let Some((url, commit_hash)) = range.split_once("#commit=") else {
+                return Err(Error::invalid_descriptor(value));
+            };
+            Ok(Self::Git {
+                ident: ident.into(),
+                url: url.into(),
+                commit_hash: commit_hash.into(),
+            })
         } else if range.starts_with("https://github.com/") {
-            if let Some((url, commit_hash)) = range.split_once("#commit=") {
-                Ok(Self::Git {
-                    ident: ident.into(),
-                    url: url.into(),
-                    commit_hash: commit_hash.into(),
-                })
-            } else {
-                Err(Error::invalid_descriptor(value))
-            }
+            let Some((url, commit_hash)) = range.split_once("#commit=") else {
+                return Err(Error::invalid_descriptor(value));
+            };
+            Ok(Self::Git {
+                ident: ident.into(),
+                url: url.into(),
+                commit_hash: commit_hash.into(),
+            })
         } else {
             Ok(Self::Regular {
                 ident: ident.into(),
@@ -124,19 +135,17 @@ impl TryFrom<String> for PackageDescriptor {
 impl PackageDescriptor {
     fn split_range<'a>(descriptor: &'a str) -> Result<(&'a str, &'a str), Error> {
         if descriptor.starts_with("@") {
-            if let Some((index, _)) = descriptor.match_indices('@').skip(1).next() {
-                let (ident, _) = descriptor.split_at(index);
-                let (_, range) = descriptor.split_at(index + 1);
-                Ok((ident, range))
-            } else {
-                Err(Error::invalid_descriptor(descriptor))
-            }
+            let Some((index, _)) = descriptor.match_indices('@').skip(1).next() else {
+                return Err(Error::invalid_descriptor(descriptor));
+            };
+            let (ident, _) = descriptor.split_at(index);
+            let (_, range) = descriptor.split_at(index + 1);
+            Ok((ident, range))
         } else {
-            if let Some((ident, range)) = descriptor.split_once("@") {
-                Ok((ident, range))
-            } else {
-                Err(Error::invalid_descriptor(descriptor))
-            }
+            let Some((ident, range)) = descriptor.split_once("@") else {
+                return Err(Error::invalid_descriptor(descriptor));
+            };
+            Ok((ident, range))
         }
     }
 
@@ -146,27 +155,26 @@ impl PackageDescriptor {
                 "^(?<protocol>[^#:\\s]*:)(?<selector>(?:(?!::)[^#\\s])*)(?:#(?<source>(?:(?!::).)*))?(?:::(?<bindings>.*))?$",
             ).unwrap();
         }
-        if let Some(captures) = RE.captures(range).unwrap() {
-            let protocol = captures.name("protocol").unwrap().as_str().to_owned();
-            let selector = captures.name("selector").unwrap().as_str().to_owned();
-            let source = captures.name("source").map(|m| m.as_str().to_owned());
-            let bindings = captures.name("bindings").map(|m| {
-                let dummy_url = "http://dummy?".to_owned() + m.as_str();
-                let parsed = Url::parse(dummy_url.as_str()).unwrap();
-                return parsed
-                    .query_pairs()
-                    .into_owned()
-                    .collect::<HashMap<String, String>>();
-            });
-            Ok(PackageRange {
-                protocol,
-                selector,
-                source,
-                bindings,
-            })
-        } else {
-            Err(Error::invalid_descriptor(descriptor))
-        }
+        let Some(captures) = RE.captures(range).unwrap() else {
+            return Err(Error::invalid_descriptor(descriptor));
+        };
+        let protocol = captures.name("protocol").unwrap().as_str().to_owned();
+        let selector = captures.name("selector").unwrap().as_str().to_owned();
+        let source = captures.name("source").map(|m| m.as_str().to_owned());
+        let bindings = captures.name("bindings").map(|m| {
+            let dummy_url = "http://dummy?".to_owned() + m.as_str();
+            let parsed = Url::parse(dummy_url.as_str()).unwrap();
+            return parsed
+                .query_pairs()
+                .into_owned()
+                .collect::<HashMap<String, String>>();
+        });
+        Ok(PackageRange {
+            protocol,
+            selector,
+            source,
+            bindings,
+        })
     }
 }
 
@@ -181,27 +189,16 @@ fn normalize_single_resolution(resolution: &str) -> Result<Dependency, Error> {
         }),
         PackageDescriptor::Regular { ident, range } => {
             match range.protocol.as_str() {
-                "npm:" => {
-                    let archive_url = range
-                        .bindings
-                        .map(|bindings| {
-                            bindings
-                                .get("__archiveUrl")
-                                .map(|archive_url| archive_url.clone())
-                        })
-                        .flatten();
-                    if archive_url.is_none() {
-                        Ok(Dependency::Npm {
-                            name: ident,
-                            version: range.selector,
-                        })
-                    } else {
-                        // private/custom registry is not supported
-                        Err(Error::UnsupportedResolution {
-                            resolution: resolution.into(),
-                        })
-                    }
-                }
+                "npm:" => match range.get_archive_url() {
+                    // private/custom registry is not supported
+                    Some(_) => Err(Error::UnsupportedResolution {
+                        resolution: resolution.into(),
+                    }),
+                    None => Ok(Dependency::Npm {
+                        name: ident,
+                        version: range.selector,
+                    }),
+                },
                 "patch:" => match percent_decode_str(range.protocol.as_str()).decode_utf8() {
                     Ok(nested_descriptor) => {
                         let inner_resolution = nested_descriptor.to_string();
@@ -218,33 +215,32 @@ fn normalize_single_resolution(resolution: &str) -> Result<Dependency, Error> {
 }
 
 fn normalize_yaml(value: Value) -> Result<HashSet<Dependency>, Error> {
-    if let Some(map) = value.as_mapping() {
-        let mut deps: HashSet<Dependency> = HashSet::new();
+    let Some(map) = value.as_mapping() else {
+        return Err(Error::invalid_format());
+    };
+    let mut deps: HashSet<Dependency> = HashSet::new();
 
-        let mut iter = map.iter();
-        let (_key, _value) = iter.next().unwrap(); // skip metadata
-        for (_key, value) in iter {
-            let resolution = value
-                .as_mapping()
-                .and_then(|map| map.get("resolution"))
-                .and_then(|value| value.as_str())
-                .ok_or_else(|| Error::invalid_format())?;
-            match normalize_single_resolution(resolution) {
-                Ok(dependency) => {
-                    deps.insert(dependency);
-                }
-                Err(Error::UnsupportedResolution { .. }) => {
-                    // noop
-                }
-                Err(error) => {
-                    return Err(error);
-                }
+    let mut iter = map.iter();
+    let (_key, _value) = iter.next().unwrap(); // skip metadata
+    for (_key, value) in iter {
+        let resolution = value
+            .as_mapping()
+            .and_then(|map| map.get("resolution"))
+            .and_then(|value| value.as_str())
+            .ok_or_else(|| Error::invalid_format())?;
+        match normalize_single_resolution(resolution) {
+            Ok(dependency) => {
+                deps.insert(dependency);
+            }
+            Err(Error::UnsupportedResolution { .. }) => {
+                // noop
+            }
+            Err(error) => {
+                return Err(error);
             }
         }
-        Ok(deps)
-    } else {
-        Err(Error::invalid_format())
     }
+    Ok(deps)
 }
 
 pub fn normalize(value: &str) -> Result<HashSet<Dependency>, Error> {
