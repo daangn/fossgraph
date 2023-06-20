@@ -65,6 +65,12 @@ enum PackageDescriptor {
         url: String, // there is no support for `ssh://` or `file://`.
         commit_hash: String,
     },
+    GitHub {
+        ident: String,
+        owner: String,
+        name: String,
+        commit_hash: String,
+    },
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -95,24 +101,35 @@ impl TryFrom<&str> for PackageDescriptor {
     fn try_from(value: &str) -> Result<Self, Self::Error> {
         let (ident, range) = Self::split_range(value)?;
         if range.starts_with("git@") {
-            // Note: Yarn serialize it as non-compatible with git protocol
-            let (hostname, other) = range.split_once("/").unwrap();
-            let range = vec![hostname, other].join(":");
             let Some((url, commit_hash)) = range.split_once("#commit=") else {
                 return Err(Error::invalid_descriptor(value));
             };
+            // Note: Yarn serialize it as non-compatible with git protocol
+            let url = {
+                let Some((hostname, substr)) = url.split_once("/") else {
+                    return Err(Error::invalid_descriptor(value));
+                };
+                vec![hostname, substr].join(":")
+            };
             Ok(Self::Git {
+                url,
                 ident: ident.into(),
-                url: url.into(),
                 commit_hash: commit_hash.into(),
             })
-        } else if range.starts_with("https://github.com/") {
-            let Some((url, commit_hash)) = range.split_once("#commit=") else {
+        } else if let Some(substr) = range.strip_prefix("https://github.com/") {
+            let Some((owner, substr)) = substr.split_once("/") else {
                 return Err(Error::invalid_descriptor(value));
             };
-            Ok(Self::Git {
+            let Some((name, substr)) = substr.split_once(".git") else {
+                return Err(Error::invalid_descriptor(value));
+            };
+            let Some((_, commit_hash)) = substr.split_once("#commit=") else {
+                return Err(Error::invalid_descriptor(value));
+            };
+            Ok(Self::GitHub {
                 ident: ident.into(),
-                url: url.into(),
+                owner: owner.into(),
+                name: name.into(),
                 commit_hash: commit_hash.into(),
             })
         } else {
@@ -187,6 +204,16 @@ fn normalize_single_resolution(resolution: &str) -> Result<Dependency, Error> {
             url,
             head: Some(commit_hash),
         }),
+        PackageDescriptor::GitHub {
+            owner,
+            name,
+            commit_hash,
+            ..
+        } => Ok(Dependency::GitHub {
+            owner,
+            name,
+            head: Some(commit_hash),
+        }),
         PackageDescriptor::Regular { ident, range } => {
             match range.protocol.as_str() {
                 "npm:" => match range.get_archive_url() {
@@ -230,6 +257,7 @@ fn normalize_yaml(value: Value) -> Result<HashSet<Dependency>, Error> {
             .ok_or_else(|| Error::invalid_format())?;
         match normalize_single_resolution(resolution) {
             Ok(dependency) => {
+                let dependency = dependency.canonicalize();
                 deps.insert(dependency);
             }
             Err(Error::UnsupportedResolution { .. }) => {
@@ -396,13 +424,9 @@ mod tests {
                     name: "yallist".into(),
                     version: "4.0.0".into(),
                 },
-                Dependency::Git {
-                    url: "https://github.com/daangn/cjk-slug.git".into(),
-                    head: Some("de5d97557a09ad61ae6ac48b1258b67d304660f0".into()),
-                },
-                // TODO: deduplicate it by canonicalizing it
-                Dependency::Git {
-                    url: "git@github.com:daangn/cjk-slug.git".into(),
+                Dependency::GitHub {
+                    owner: "daangn".into(),
+                    name: "cjk-slug".into(),
                     head: Some("de5d97557a09ad61ae6ac48b1258b67d304660f0".into()),
                 },
             ]),
@@ -429,9 +453,10 @@ mod tests {
         let descriptor = PackageDescriptor::try_from(descriptor);
         assert_eq!(
             descriptor,
-            Ok(PackageDescriptor::Git {
+            Ok(PackageDescriptor::GitHub {
                 ident: "cjk-slug".into(),
-                url: "https://github.com/daangn/cjk-slug.git".into(),
+                owner: "daangn".into(),
+                name: "cjk-slug".into(),
                 commit_hash: "de5d97557a09ad61ae6ac48b1258b67d304660f0".into(),
             }),
         );
