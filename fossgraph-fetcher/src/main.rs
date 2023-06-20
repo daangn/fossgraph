@@ -13,7 +13,7 @@ async fn main() -> Result<()> {
     let bytes = source.into_inner();
 
     let mut file = tokio::fs::File::create("test.zip").await?;
-    file.write(bytes.as_ref()).await?;
+    file.write_all(bytes.as_ref()).await?;
 
     Ok(())
 }

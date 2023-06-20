@@ -24,7 +24,6 @@ pub fn from_tar(
         for entry_result in tar.entries()? {
             let mut entry = entry_result?;
             let path = entry.path()?;
-            // let size = entry.header().size()?;
             let mode = entry.header().mode()?;
             let options = FileOptions::default()
                 .compression_method(zip::CompressionMethod::Zstd)
@@ -33,8 +32,8 @@ pub fn from_tar(
             zip_writer.start_file(path.to_str().unwrap(), options)?;
 
             let mut buf = Vec::new();
-            entry.read(&mut buf)?;
-            zip_writer.write(&mut buf)?;
+            entry.read_to_end(&mut buf)?;
+            zip_writer.write_all(&buf)?;
         }
 
         zip_writer.finish()?;

@@ -31,7 +31,7 @@ impl Dependency {
         match self {
             Self::Git { url, head } => {
                 if let Some(substr) = url.strip_prefix("git@github.com:") {
-                    let (owner, substr) = substr.split_once("/").unwrap();
+                    let (owner, substr) = substr.split_once('/').unwrap();
                     let (name, _) = substr.split_once(".git").unwrap();
                     return Self::GitHub {
                         owner: owner.into(),

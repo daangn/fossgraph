@@ -16,7 +16,7 @@ pub enum Error {
 impl NpmPackage {
     pub fn to_archive_url(&self) -> Url {
         let Self { name, version } = self;
-        let url = if let Some((group, name)) = name.split_once("/") {
+        let url = if let Some((group, name)) = name.split_once('/') {
             format!("https://registry.npmjs.org/{group}/{name}/-/{name}-{version}.tgz")
         } else {
             format!("https://registry.npmjs.org/{name}/-/{name}-{version}.tgz")

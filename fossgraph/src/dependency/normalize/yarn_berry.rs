@@ -38,7 +38,7 @@ impl Error {
 
     fn invalid_descriptor(descriptor: &str) -> Self {
         Self::InvalidLockfileFormat {
-            message: format!("Some resolution has unsupported descriptor: {}", descriptor),
+            message: format!("Some resolution has unsupported descriptor: {descriptor}"),
         }
     }
 }
@@ -86,12 +86,7 @@ impl PackageRange {
     fn get_archive_url(&self) -> Option<String> {
         self.bindings
             .as_ref()
-            .map(|bindings| {
-                bindings
-                    .get("__archiveUrl")
-                    .map(|archive_url| archive_url.clone())
-            })
-            .flatten()
+            .and_then(|bindings| bindings.get("__archiveUrl").cloned())
     }
 }
 
@@ -106,7 +101,7 @@ impl TryFrom<&str> for PackageDescriptor {
             };
             // Note: Yarn serialize it as non-compatible with git protocol
             let url = {
-                let Some((hostname, substr)) = url.split_once("/") else {
+                let Some((hostname, substr)) = url.split_once('/') else {
                     return Err(Error::invalid_descriptor(value));
                 };
                 vec![hostname, substr].join(":")
@@ -117,7 +112,7 @@ impl TryFrom<&str> for PackageDescriptor {
                 commit_hash: commit_hash.into(),
             })
         } else if let Some(substr) = range.strip_prefix("https://github.com/") {
-            let Some((owner, substr)) = substr.split_once("/") else {
+            let Some((owner, substr)) = substr.split_once('/') else {
                 return Err(Error::invalid_descriptor(value));
             };
             let Some((name, substr)) = substr.split_once(".git") else {
@@ -150,16 +145,16 @@ impl TryFrom<String> for PackageDescriptor {
 }
 
 impl PackageDescriptor {
-    fn split_range<'a>(descriptor: &'a str) -> Result<(&'a str, &'a str), Error> {
-        if descriptor.starts_with("@") {
-            let Some((index, _)) = descriptor.match_indices('@').skip(1).next() else {
+    fn split_range(descriptor: &str) -> Result<(&str, &str), Error> {
+        if descriptor.starts_with('@') {
+            let Some((index, _)) = descriptor.match_indices('@').nth(1) else {
                 return Err(Error::invalid_descriptor(descriptor));
             };
             let (ident, _) = descriptor.split_at(index);
             let (_, range) = descriptor.split_at(index + 1);
             Ok((ident, range))
         } else {
-            let Some((ident, range)) = descriptor.split_once("@") else {
+            let Some((ident, range)) = descriptor.split_once('@') else {
                 return Err(Error::invalid_descriptor(descriptor));
             };
             Ok((ident, range))
@@ -254,7 +249,7 @@ fn normalize_yaml(value: Value) -> Result<HashSet<Dependency>, Error> {
             .as_mapping()
             .and_then(|map| map.get("resolution"))
             .and_then(|value| value.as_str())
-            .ok_or_else(|| Error::invalid_format())?;
+            .ok_or_else(Error::invalid_format)?;
         match normalize_single_resolution(resolution) {
             Ok(dependency) => {
                 let dependency = dependency.canonicalize();
